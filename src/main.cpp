@@ -28,6 +28,7 @@ long long mikrovolt( uint32_t raw ) {
 
 void setup() {
     Serial.begin(115200);
+    delay(1500);
     Serial.println("ADS1256 swipe mode " __FILE__ " " __TIMESTAMP__);
 
     attachInterrupt(PIN_DRDY, readyIsr, FALLING);
@@ -56,18 +57,43 @@ void setup() {
     Serial.printf("One shot 6(g=6): %lld\n", mikrovolt(ads.one_shot()/64));
     Serial.printf("One shot 6(g=6): %lld\n", mikrovolt(ads.one_shot()/64));
 
-    Ads1256::value_t values[10];
+    Ads1256::value_t values[10] = {0};
+    
+    bool third = false;
+
+    ads.sps(Ads1256::SPS_30K);
+
     if( ads.bulk_read(values, 10) ) {
       for( int i=0; i < 10; i++ ) {
         Serial.printf("Bulk(%d): %lld\n", i, mikrovolt(Ads1256::to_int(values[i])/64));
       }
     }
-    
+    else {
+      Serial.println("bulk 1 failed");
+    }
+
+    memset(values, 0, sizeof(values));
+
+    if( ads.bulk_read(values, 3, false) && (third = true) && ads.bulk_read(&values[3], 3, false) && ads.bulk_read(&values[6], 4, true) ) {
+      for( int i=0; i < 10; i++ ) {
+        Serial.printf("Bulk(%d): %lld\n", i, mikrovolt(Ads1256::to_int(values[i])/64));
+      }
+    }
+    else {
+      if( third )
+        Serial.println("bulk 3 or 4 failed");
+      else
+        Serial.println("bulk 2 failed");
+    }
+
     ads.command(Ads1256::RESET);
     ads.wait();
+
     ads.clock_out(Ads1256::CO_OFF);  // dont drive external clock out 
-    uint8_t cmd = 0b11110000;
+
+    uint8_t cmd = 0b11110000; // IO -> all output, all GND
     ads.wreg(Ads1256::IO, &cmd, 1);  // save power for open pins
+    
     ads.sps(Ads1256::SPS_100);
     ads.auto_calibrate(true);
     ads.mux(chan);  // 0->gnd

@@ -318,16 +318,16 @@ int32_t Ads1256::one_shot( uint8_t ain, uint8_t aout, uint8_t gain_power) {
     return INT32_MIN;
 }
 
-// assumes idle
-bool Ads1256::bulk_read( value_t *values, uint32_t count ) {
-    if( count-- && rdatac(*(values++)) ) {
-        while( --count ) {
+// assumes idle or cont
+bool Ads1256::bulk_read( value_t *values, uint32_t count, bool once ) {
+    if( (_status == CONT && count) || (rdatac(*(values++)) && count--) ) {
+        while( count-- > 1 ) {
             while( !update(values) ) {
                 yield();
             }
             values++;
         }
-        if( command(SDATAC) ) {
+        if( !once || command(SDATAC) ) {
             while( !update(values) ) {
                 yield();
             }

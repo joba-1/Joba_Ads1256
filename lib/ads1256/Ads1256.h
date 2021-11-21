@@ -60,7 +60,7 @@ public:
         CONT,    // wait for continuous DRDY lows
         STOP,    // stop continuous mode -> IDLE
         RESTART, // reset from continuous mode -> INIT
-        INIT     // recover from reset
+        INIT     // recover from reset, calibration
     } status_t;
 
     typedef enum rate {
@@ -127,7 +127,7 @@ public:
     int32_t one_shot();  // using current settings, from standby -> standby
     int32_t one_shot( uint8_t ain, uint8_t aout = 8, uint8_t gain = 0);  // reset -> standby
 
-    bool bulk_read( value_t *values, uint32_t count );  // Idle -> Idle, using current settings
+    bool bulk_read( value_t *values, uint32_t count, bool once = true );  // Idle -> Idle, using current settings
     // TODO: flag for keep going
 
     static int32_t to_int( const value_t &value );

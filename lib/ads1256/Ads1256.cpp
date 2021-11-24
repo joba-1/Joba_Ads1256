@@ -13,13 +13,15 @@ void Ads1256::begin() {
 }
 
 bool Ads1256::update( value_t *value ) {
+    uint8_t cmd;
     if( _ready && _status != IDLE ) {
         switch( _status ) {
             case SINGLE:
                 if( value ) {
-                    value->hi = 0x01;  // RDATA
+                    cmd = 0x01;  // RDATA
+                    *value = {0};
                     _spi.start();
-                    _spi.transfer(&value->hi, 1);
+                    _spi.transfer(&cmd, 1);
                     _delay.us(tx_us(T6));    // pg 6
                     _spi.transfer((uint8_t *)value, 3);
                     _delay.us(tx_us(T10));   // pg 6
@@ -30,11 +32,17 @@ bool Ads1256::update( value_t *value ) {
                 break;
             case STOP:
                 if( value ) {
-                    value->hi = 0x0f;  // SDATAC
+                    *value = {0x0f};  // SDATAC
+                    _spi.start();
+                    _spi.transfer((uint8_t *)value, 3);
+                    _delay.us(tx_us(T10));  // pg 6
+                    _spi.end();
                 }
                 _status = IDLE;
+                break;
             case CONT:
                 if( value ) {
+                    *value = {0};
                     _spi.start();
                     _spi.transfer((uint8_t *)value, 3);
                     _delay.us(tx_us(T10));  // pg 6
@@ -108,9 +116,10 @@ bool Ads1256::rdata() {
 bool Ads1256::rdatac( value_t &value ) {
     if( _status != CONT && _status != INIT ) {
         if( _status != STOP && _status != RESTART ) {
+            uint8_t cmd = 0x03;  // RDATAC
+            value = {0};
             _spi.start();
-            value.hi = 0x03;  // RDATAC
-            _spi.transfer(&value.hi, 1);
+            _spi.transfer(&cmd, 1);
             _delay.us(tx_us(T6));    // pg 6
             _spi.transfer((uint8_t *)&value, 3);
             _delay.us(tx_us(T10));   // pg 6
@@ -125,8 +134,11 @@ bool Ads1256::rdatac( value_t &value ) {
 }
 
 bool Ads1256::rreg( register_t reg, uint8_t *buffer, uint8_t len ) {
-    if( len > 16 ) return false;
-    uint8_t cmd[2] = { (uint8_t)reg | 0x10, len - 1 };
+    if( reg + len - 1 > Ads1256::FSC2 ) return false;
+    uint8_t cmd[2];
+    cmd[0] = reg | 0x10;
+    cmd[1] = len - 1;
+    memset(buffer, 0, len);
     _spi.start();
     _spi.transfer(cmd, sizeof(cmd));
     _delay.us(tx_us(T6));    // pg 6
@@ -138,8 +150,10 @@ bool Ads1256::rreg( register_t reg, uint8_t *buffer, uint8_t len ) {
 }
 
 bool Ads1256::wreg( register_t reg, uint8_t *buffer, uint8_t len ) {
-    if( len > 16 ) return false;
-    uint8_t cmd[2] = { (uint8_t)reg | 0x50, len - 1 };
+    if( reg + len - 1 > Ads1256::FSC2 ) return false;
+    uint8_t cmd[2];
+    cmd[0] = reg | 0x50;
+    cmd[1] = len - 1;
     _spi.start();
     _spi.transfer(cmd, sizeof(cmd));
     _spi.transfer(buffer, len);
@@ -153,36 +167,45 @@ void Ads1256::sps( rate_t rate ) {
     wreg(DRATE, (uint8_t *)&rate, 1);
 }
 
-void Ads1256::clock_out( clock_out_t ratio ) {
+bool Ads1256::clock_out( clock_out_t ratio ) {
     uint8_t adcon;
-    rreg(ADCON, &adcon, 1);
-    adcon &= ~(0b1100000);
-    adcon |= (uint8_t)ratio;
-    wreg(ADCON, &adcon, 1);
+    if( rreg(ADCON, &adcon, 1) ) {
+        if( (adcon & 0b1100000) == ratio ) return true;
+        adcon &= ~(0b1100000);
+        adcon |= (uint8_t)ratio;
+        return wreg(ADCON, &adcon, 1);
+    }
+    return false;
 }
 
-void Ads1256::detect_current( detect_current_t current ) {
+bool Ads1256::detect_current( detect_current_t current ) {
     uint8_t adcon;
-    rreg(ADCON, &adcon, 1);
-    adcon &= ~(0b11000);
-    adcon |= (uint8_t)current;
-    wreg(ADCON, &adcon, 1);
+    if( rreg(ADCON, &adcon, 1) ) {
+        if( (adcon & 0b11000) == current ) return true;
+        adcon &= ~(0b11000);
+        adcon |= (uint8_t)current;
+        return wreg(ADCON, &adcon, 1);
+    }
+    return false;
 }
 
-void Ads1256::gain( uint8_t power_of_two ) {
-    if( power_of_two > 7 ) power_of_two = 7;
-    uint8_t adcon;
-    rreg(ADCON, &adcon, 1);
-    adcon &= ~(0b111);
-    adcon |= power_of_two;
-    wreg(ADCON, &adcon, 1);
+bool Ads1256::gain( uint8_t power_of_two ) {
+    if( power_of_two <= 7 ) {
+        uint8_t adcon;
+        if( rreg(ADCON, &adcon, 1) ) {
+            if( (adcon & 0b111) == power_of_two ) return true;
+            adcon &= ~(0b111);
+            adcon |= power_of_two;
+            return wreg(ADCON, &adcon, 1);
+        }
+    }
+    return false;
 }
 
 bool Ads1256::mux( uint8_t ain, uint8_t aout ) {
     if( ain > 8 || aout > 8 || ain == aout ) return false;
     aout |= ain << 4;
-    wreg(MUX, &aout, 1);
-    return true;
+    return wreg(MUX, &aout, 1);
 }
 
 uint8_t Ads1256::id() {
@@ -274,17 +297,26 @@ bool Ads1256::io_read( pin_t pin ) {
 }
 
 int32_t Ads1256::to_int( const value_t &value ) {
-    return ((int32_t)value.hi << 16) | (value.mid << 8) | value.lo;
+    return (value.hi << 16) | (value.mid << 8) | value.lo;
+}
+
+int32_t Ads1256::to_microvolts( int32_t raw, uint8_t gain, int32_t uvRef ) {
+    if( raw == 8388607 ) return INT32_MAX;
+    if( raw == -8388608 ) return INT32_MIN; 
+    // int64_t uvModulatorRange = uvRef * 2;                                 // full voltage range the modulator can measure
+    // int64_t uvModulatorIn = (uvModulatorRange * raw) / ((1L << 23) - 1);  // maps raw (-2^23 ... +2^23-1) to VinDiff (0 .. uvFullRange)
+    // return uvModulatorIn >> gain;                                         // finally reduce voltage value by gain
+    // equivalent calculation:
+	return (((int64_t)raw * uvRef) / ((1LL << 22) - 1)) >> gain;  // remains: add AinN if it is not 0 
 }
 
 uint16_t Ads1256::tx_us( uint8_t taus ) {
     return (taus * _tau_clkin_ns + 999) / 1000;  
 }
 
-// assumes to be in standby
+// assumes to be in standby or sync
 int32_t Ads1256::one_shot() {
     if( command(Ads1256::WAKEUP) && rdata() ) {
-        rdata();
         value_t value;
         while( !update(&value) ) {
             yield();
@@ -301,17 +333,8 @@ int32_t Ads1256::one_shot( uint8_t ain, uint8_t aout, uint8_t gain_power) {
         wait();
         if( mux(ain, aout) ) {
             gain(gain_power);
-            if( command(Ads1256::SELFCAL) ) {
-                wait();
-                if( command(Ads1256::SYNC) && command(Ads1256::WAKEUP) ) {
-                    rdata();
-                    value_t value;
-                    while( !update(&value) ) {
-                        yield();
-                    }
-                    command(Ads1256::STANDBY);
-                    return to_int(value);
-                }
+            if( command(Ads1256::SYNC) ) {
+                return one_shot();
             }
         }
     }

@@ -85,7 +85,7 @@ public:
     } pin_t;
 
     typedef struct value {
-        uint8_t hi, mid, lo;
+        int8_t hi; uint8_t mid, lo;
     } value_t;
 
     // Prerequisite: set ready on falling edge of DRDY (too much hassle to put portable interrupt handling in a class...)
@@ -102,20 +102,20 @@ public:
     bool rdatac( value_t &value );  // start continuous mode
 
     // Ads1256 commands without state
-    bool rreg( register_t reg, uint8_t *buffer, uint8_t len ); // read up to 16 bytes
-    bool wreg( register_t reg, uint8_t *buffer, uint8_t len ); // write up to 16 bytes 
+    bool rreg( register_t reg, uint8_t *buffer, uint8_t len ); // read up to 11 bytes
+    bool wreg( register_t reg, uint8_t *buffer, uint8_t len ); // write up to 11 bytes 
 
     // Change settings
     void sps( rate_t rate );
-    void clock_out( clock_out_t ratio );
-    void detect_current( detect_current_t current );
-    void gain( uint8_t power_of_two );
+    bool clock_out( clock_out_t ratio );
+    bool detect_current( detect_current_t current );
+    bool gain( uint8_t power_of_two );
     bool mux( uint8_t ain, uint8_t aout = 8 );
-    uint8_t id();
     void auto_calibrate( bool on );
     void buffer( bool on );
 
     // Read status
+    uint8_t id();
     void get_calibration( value_t &offset, value_t &full );
     bool ready();  // DRDY from status register
 
@@ -125,12 +125,13 @@ public:
     bool io_read( pin_t pin );
 
     int32_t one_shot();  // using current settings, from standby -> standby
-    int32_t one_shot( uint8_t ain, uint8_t aout = 8, uint8_t gain = 0);  // reset -> standby
+    int32_t one_shot( uint8_t ain, uint8_t aout = 8, uint8_t gain = 0);  // init everything from reset -> standby
 
     bool bulk_read( value_t *values, uint32_t count, bool once = true );  // Idle -> Idle, using current settings
-    // TODO: flag for keep going
 
     static int32_t to_int( const value_t &value );
+    // AinP voltage relative to AinN (with gain factor = 2^gain and uvRef = VrefP - VrefN) 
+    static int32_t to_microvolts( int32_t raw, uint8_t gain = 0, int32_t uvRef = 2500000 );
 
 private:
     static const uint8_t T6 = 50;
@@ -141,10 +142,10 @@ private:
     uint16_t tx_us( uint8_t taus );  // microseconds from T* values
 
     uint16_t _tau_clkin_ns;  // time of one clock tick (for delays)
-    Spi &_spi;  // portable spi handler
-    Delay &_delay;  // portable microsecond delays
-    volatile bool &_ready;  // externally driven interrupt flag for DRDY
-    status_t _status;  // Ads1256 state
+    Spi &_spi;               // portable spi handler interface
+    Delay &_delay;           // portable microsecond delays interface
+    volatile bool &_ready;   // externally driven interrupt flag for DRDY
+    status_t _status;        // chip status (state engine)
 };
 
 

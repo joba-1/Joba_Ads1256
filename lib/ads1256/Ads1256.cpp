@@ -327,15 +327,12 @@ int32_t Ads1256::one_shot() {
     return INT32_MIN;
 }
 
-// assumes not to be in continuous read mode
+// assumes not to be in continuous read mode (?)
 int32_t Ads1256::one_shot( uint8_t ain, uint8_t aout, uint8_t gain_power) {
     if( command(Ads1256::RESET) ) {
         wait();
-        if( mux(ain, aout) ) {
-            gain(gain_power);
-            if( command(Ads1256::SYNC) ) {
-                return one_shot();
-            }
+        if( mux(ain, aout) && gain(gain_power) && command(Ads1256::SYNC) ) {
+            return one_shot();
         }
     }
     return INT32_MIN;

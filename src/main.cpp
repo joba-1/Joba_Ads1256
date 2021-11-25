@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include <Ads1256.h>
+#include <math.h>
 
 
 #define PIN_CS 5
@@ -47,11 +48,10 @@ void resetAds() {
 void printRegs() {
     uint8_t data[Ads1256::FSC2 + 1];
 
-    Serial.println();
-    Serial.println("ST MU AD DR IO O0 O1 O2 F0 F1 F2");
 
     ads.rreg(Ads1256::STATUS, data, sizeof(data));
 
+    Serial.print("(ST MU AD DR IO OFFSET FULL)=(");
     for(size_t i = 0; i < 5; i++) {
         Serial.printf("%02x ", data[i]);
     }
@@ -63,7 +63,7 @@ void printRegs() {
     f.lo = data[8]; 
     f.mid = data[9]; 
     f.hi = data[10]; 
-    Serial.printf("%8d %8d\n\n", Ads1256::to_int(o), Ads1256::to_int(f));
+    Serial.printf("%8d %8d) - ", Ads1256::to_int(o), Ads1256::to_int(f));
 }
 
 
@@ -109,13 +109,13 @@ void setup() {
     for( uint8_t in = 0; in < 8; in++ ) {
         for( uint8_t g = 0; g <= 7; g++ ) {
             int32_t raw = ads.one_shot(in, 8, g);
-            Serial.printf("One shot channel=%u, gain=%u, hml=(%02x %02x %02x), value=%d\n", in, g, (raw >> 16) & 0xff, (raw >> 8) & 0xff, raw & 0xff, Ads1256::to_microvolts(raw));
+            Serial.printf("One shot chan=%u, gain=%u, hml=(%02x %02x %02x), µV=%d\n", in, g, (raw >> 16) & 0xff, (raw >> 8) & 0xff, raw & 0xff, Ads1256::to_microvolts(raw));
             printRegs();
         }
         int32_t raw = ads.one_shot(in, 8, 0);
-        Serial.printf("One shot channel=%u, gain=%u, hml=(%02x %02x %02x), value=%d\n", in, 0, (raw >> 16) & 0xff, (raw >> 8) & 0xff, raw & 0xff, Ads1256::to_microvolts(raw));
-        printRegs();
+        Serial.printf("One shot chan=%u, gain=%u, hml=(%02x %02x %02x), µV=%d\n", in, 0, (raw >> 16) & 0xff, (raw >> 8) & 0xff, raw & 0xff, Ads1256::to_microvolts(raw));
         Serial.println();
+        printRegs();
     }
 
     resetAds();
@@ -180,16 +180,22 @@ void loop() {
 
     // this could be done in another task so next bulk_read could start earlier (or better use circular buffer)
     if( ok ) { 
-        Serial.printf("\nChannel %u with gain factor %u: Elapsed: %u ms -> %u SPS\n", lastChan, lastGain, elapsed, (numValues*1000)/elapsed);
+        Serial.printf("Channel %u with gain factor %u: Elapsed: %u ms -> %u SPS - ", 
+            lastChan, lastGain, elapsed, (numValues*1000)/elapsed);
+        int32_t minValue = INT32_MAX;
+        int32_t maxValue = INT32_MIN;
+        int64_t sumValues = 0;
+        int64_t sumSquaredValues = 0;
         for( int i = 0; i < numValues; i++ ) {
-            Serial.printf("Bulk(%5d): (%02x %02x %02x) = %10d raw = %10d µV\n", 
-                i, lastValues[i].hi, lastValues[i].mid, lastValues[i].lo, 
-                Ads1256::to_int(lastValues[i]), Ads1256::to_microvolts(Ads1256::to_int(lastValues[i]), lastGain));
-            if( i == 4 || i == numValues/2 + 2) {
-                Serial.println();
-                i += numValues/2 - 7;
-            }
+            int32_t currValue = Ads1256::to_microvolts(Ads1256::to_int(lastValues[i]), lastGain);
+            if( currValue < minValue ) minValue = currValue;
+            if( currValue > maxValue ) maxValue = currValue;
+            sumValues += currValue;
+            sumSquaredValues += (int64_t)currValue * currValue;
         }
+        Serial.printf("Bulk(%u): min/max/avg/stddev=%10d, %10d, %10d, %10.2f\n", 
+            numValues, minValue, maxValue, (int32_t)(sumValues/numValues), 
+            sqrt( (sumSquaredValues - (double)(sumValues*sumValues)/numValues) / (numValues - 1) ));
         ads.command(Ads1256::SDATAC);
         ads.rdata();
         ads.wait();

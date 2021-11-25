@@ -1,0 +1,43 @@
+digraph Ads1256_States {
+
+    # graph [splines=false];
+
+    subgraph cluster_oneshot {
+        label = "Single Shot"
+
+        Start -> DRdy  -> Idle
+        DRdy  -> RDATA -> Idle
+        Idle  -> RREG  -> Idle
+        Idle  -> NoCal_WREG  -> Idle
+        Idle  -> RESET -> DRdy
+        Idle -> STANDBY
+        Idle -> SYNC
+        WAKEUP -> DRdy
+        Idle -> someCAL -> DRdy
+        Idle -> AutoCal_WREG -> DRdy
+        DRdy -> Timeout -> RESET
+
+        subgraph cluster_wakeup {
+            label = "Wakeup"
+
+            STANDBY -> WAKEUP
+            SYNC    -> WAKEUP
+        }
+
+        subgraph cluster_calibrate {
+            label = "Calibration"
+
+            someCAL
+            AutoCal_WREG
+        }
+    }
+
+    subgraph cluster_continuous {
+        label = "Continuous"
+
+        DRdy      -> RDATAC -> Cont_DRdy
+        Cont_DRdy -> Read   -> Cont_Idle -> Cont_DRdy
+        Cont_DRdy -> SDATAC -> Idle
+        Cont_DRdy -> RESET
+    }
+}

@@ -2,6 +2,8 @@ digraph Ads1256_States {
 
     # graph [splines=false];
 
+    DRdy, Cont_DRdy, Idle, Sleep [shape=box, fillcolor=lightyellow, style=filled ]
+
     subgraph cluster_oneshot {
         label = "Single Shot"
 
@@ -15,12 +17,12 @@ digraph Ads1256_States {
         WAKEUP -> DRdy
         Idle -> someCAL -> DRdy
         Idle -> AutoCal_WREG -> DRdy
-        DRdy -> Timeout -> RESET
+        DRdy -> Timeout -> Idle
 
         subgraph cluster_wakeup {
             label = "Wakeup"
 
-            STANDBY -> WAKEUP
+            STANDBY -> Sleep -> WAKEUP
             SYNC    -> WAKEUP
         }
 
@@ -36,7 +38,7 @@ digraph Ads1256_States {
         label = "Continuous"
 
         DRdy      -> RDATAC -> Cont_DRdy
-        Cont_DRdy -> Read   -> Cont_Idle -> Cont_DRdy
+        Cont_DRdy -> Read   -> Cont_DRdy
         Cont_DRdy -> SDATAC -> Idle
         Cont_DRdy -> RESET
     }

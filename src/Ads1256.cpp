@@ -359,7 +359,7 @@ int32_t Ads1256Base::read_once( uint8_t ain, uint8_t aout, uint8_t gain_power, u
 
 bool Ads1256Base::read_bulk( value_t *values, uint32_t count, bool once, uint32_t timeout_ms ) {
     if( count == 0 ) return true;  // not reading never fails
-    if( count == 1 && (_state != CONT || once) ) return false;  // start or end continuous mode need one reading
+    if( count == 1 && (_state != CONT || once) ) return false;  // start or end continuous mode needs one reading
     if( count == 2 && (_state != CONT && once) ) return false;  // start and end continuous mode needs two readings
     if( _state != CONT && wait(timeout_ms) && rdatac(*(values++))) {
         --count;

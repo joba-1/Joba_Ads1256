@@ -14,11 +14,11 @@ Status:
 * All chip features are supported, except for data output bit order and auto calibration
   * output bit order is simply not tested yet (don't see the usecase)
   * auto calibration changes the state machine of the chip and would require monitoring registers (too much hassle)
-* IO pins of the Ads1256 can be managed via register IO, io_out()/io_read()/io_write() functions
+* IO pins of the Ads1256 can be managed via register IO, with io_out()/io_read()/io_write() functions
   or via classes IoPinIn and IoPinOut, your choice.
 * There are convenience functions for reading values available
   * read a single value using current settings
-  * read a single value, including a reset and setting mux and gain
+  * read a single value, starting with a reset and setting mux and gain
   * bulk readings into a buffer of values from a single channel
   * swipe readings over all given muxes, one after another into a buffer of values
 * Performance
@@ -40,6 +40,7 @@ public:
     class Time {
     public:
         virtual void delay_us( uint16_t us ) = 0;
+        virtual void delay_ms( uint16_t ms ) = 0;  // yields, if supported
         virtual uint32_t now_ms() = 0;
     };
 
@@ -80,32 +81,32 @@ public:
     } register_t;
 
     typedef enum { 
-        WAKEUP, RDATA, RDATAC=0x03, SDATAC=0x0f, RREG=0x10, WREG=0x50, SELFCAL=0xf0, 
-        SELFOCAL, SELFGCAL, SYSOCAL, SYSGCAL, SYNC=0xfc, STANDBY, RESET
+        WAKEUP, RDATA, RDATAC = 0x03, SDATAC = 0x0f, RREG = 0x10, WREG = 0x50, SELFCAL = 0xf0, 
+        SELFOCAL, SELFGCAL, SYSOCAL, SYSGCAL, SYNC = 0xfc, STANDBY, RESET
     } command_t;
 
     typedef enum state {
-        DRDY,    // wait for one DRDY low
+        DRDY,    // wait for one DRDY low: ready -> true
         IDLE,    // nothing pending
-        CONT,    // wait for continuous DRDY lows
+        CONT,    // wait for continuous DRDY lows: ready -> true
         SLEEP    // wait for WAKEUP
     } state_t;
 
     typedef enum rate {
-        SPS_30K =0b11110000, SPS_15K=0b11100000, SPS_7K5=0b11010000, 
-        SPS_3K75=0b11000000, SPS_2K =0b10110000, SPS_1K =0b10100001, 
-        SPS_500 =0b10010010, SPS_100=0b10000010, SPS_60 =01110010, 
-        SPS_50  =0b01100011, SPS_30 =0b01010011, SPS_25 =0b01000011, 
-        SPS_15  =0b00110011, SPS_10 =0b00100011, SPS_5  =0b00010011, 
-        SPS_2_5 =0b00000011
+        SPS_30K  = 0b11110000, SPS_15K = 0b11100000, SPS_7K5 = 0b11010000, 
+        SPS_3K75 = 0b11000000, SPS_2K  = 0b10110000, SPS_1K  = 0b10100001, 
+        SPS_500  = 0b10010010, SPS_100 = 0b10000010, SPS_60  = 0b01110010, 
+        SPS_50   = 0b01100011, SPS_30  = 0b01010011, SPS_25  = 0b01000011, 
+        SPS_15   = 0b00110011, SPS_10  = 0b00100011, SPS_5   = 0b00010011, 
+        SPS_2_5  = 0b00000011
     } rate_t;
 
     typedef enum clock_out {
-        CO_OFF=0b000000, CO_1=0b010000, CO_2=0b100000, CO_4=0b110000
+        CO_OFF = 0b000000, CO_1 = 0b010000, CO_2 = 0b100000, CO_4 = 0b110000
     } clock_out_t;
 
     typedef enum detect_current {
-        DC_OFF=0b0000, DC_0_5=0b0100, DC_2=0b1000, DC_10=0b1100
+        DC_OFF = 0b0000, DC_0_5 = 0b0100, DC_2 = 0b1000, DC_10 = 0b1100
     } detect_current_t;
 
     typedef enum pin {
@@ -124,7 +125,7 @@ public:
     // Prerequisite: set ready on falling edge of DRDY (too much hassle to put portable interrupt handling in a class...)
     Ads1256Base( Spi &spi, Time &delay, volatile bool &ready, uint32_t freq = FREQUENCY );
 
-    // state machine
+    // SPI bus and IRQ line
     void begin();  // call to init SPI with max speed if not done elsewhere
     bool wait( uint32_t timeout_ms = TIMEOUT_MS );  // return true when ready or false if nothing to wait for or timeout
 
@@ -164,22 +165,23 @@ public:
     void io_write( pin_t pin, bool on );
     bool io_read( pin_t pin );
 
-    // convenience command series handling ads state, if possible 
+    // Convenience command series handling ads state, if possible 
     int32_t read_once( uint32_t timeout_ms = TIMEOUT_MS );  // read once, using current settings
     int32_t read_once( uint8_t ain, uint8_t aout = 8, uint8_t gain = 0, uint32_t timeout_ms = TIMEOUT_MS );  // init everything from reset -> idle
     bool read_bulk( value_t *values, uint32_t count, bool once = true, uint32_t timeout_ms = TIMEOUT_MS );  // Idle -> Idle, using current settings
     bool read_swipe( value_t *values, uint8_t *ains, uint8_t *aouts, uint32_t count, bool first = true, uint32_t timeout_ms = TIMEOUT_MS );  // Idle -> Idle, using current settings
 
-    // convert signed 24bit struct to signed 32bit
+    // Convert signed 24bit struct to signed 32bit
     static int32_t to_int( const value_t &value );
     // AinP voltage relative to AinN (with gain factor = 2^gain and uvRef = VrefP - VrefN) 
     static int32_t to_microvolts( int32_t raw, uint8_t gain = 0, int32_t uvRef = UV_REF );  // TODO: WIP
 
 private:
-    static const uint8_t T6 = 50;
-    static const uint8_t T10 = 8;
-    static const uint8_t T11a = 4;
-    static const uint8_t T11b = 24;
+    // Chip SPI timings in terms of chip frequency [1/fclkin]
+    static const uint8_t T6 = 50;    // pg 6: delay between sending command and requesting result
+    static const uint8_t T10 = 8;    // pg 6: keep chip selected after last clock
+    static const uint8_t T11a = 4;   // pg 6: minimal clock gap between commands RREG, WREG or RDATA
+    static const uint8_t T11b = 24;  // pg 6: minimal clock gap between commands RDATAC, SYNC
 
     uint16_t tx_us( uint8_t taus );             // microseconds from T* values
     void xfer( uint8_t *buffer, uint8_t len );  // spi transfer buffer (bidirectional, sends then reads buffer)
@@ -232,6 +234,10 @@ public:
     public:
         virtual void delay_us( uint16_t us ) {
             delayMicroseconds(us);
+        }
+
+        virtual void delay_ms( uint16_t ms ) {
+            delay(ms);
         }
 
         virtual uint32_t now_ms() {

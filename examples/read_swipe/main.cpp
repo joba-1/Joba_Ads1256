@@ -1,7 +1,6 @@
 #include <Arduino.h>
 
 #include <Ads1256.h>
-#include <math.h>
 
 
 #define PIN_CS 5
@@ -112,7 +111,7 @@ void check24bit() {
 void setup() {
     Serial.begin(115200);
     // delay(1500);
-    Serial.println("\nADS1256 test " __FILE__ " " __TIMESTAMP__);
+    Serial.println("\nADS1256 swipe " __FILE__ " " __TIMESTAMP__);
 
     // check24bit();
  
@@ -124,52 +123,12 @@ void setup() {
     // then ads is calibrated, idle, single read mode for channel 0-1 mux, no gain
     resetAds();  // reset ads and set some basic config (SPS, mux, clock out, standby)
 
-    // on shot measurements for each channel and gain combination
-    printRegs();  // show status of all registers
-    for( uint8_t in = 0; in < 8; in++ ) {
-        for( uint8_t g = 0; g <= 7; g++ ) {
-            int32_t raw = ads.read_once(in, 8, g);
-            Serial.printf("One shot chan=%u, gain=%u, hml=(%02x %02x %02x), µV=%d\n", in, g, (raw >> 16) & 0xff, (raw >> 8) & 0xff, raw & 0xff, Ads1256::to_microvolts(raw));
-            printRegs();
-        }
-        // to check consistency, try channel 0 a second time
-        int32_t raw = ads.read_once(in, 8, 0);
-        Serial.printf("One shot chan=%u, gain=%u, hml=(%02x %02x %02x), µV=%d\n", in, 0, (raw >> 16) & 0xff, (raw >> 8) & 0xff, raw & 0xff, Ads1256::to_microvolts(raw));
-        Serial.println();
+    if( ads.wakeup() && ads.wait() ) {
         printRegs();
+        Serial.println("init done");
     }
-
-    resetAds();
-    ads.wakeup() && ads.wait();
-    printRegs();
-}
-
-
-void handleKeypress( uint8_t &chan, uint8_t &gain ) {
-    uint8_t newGain = gain;
-    bool gainCal = false;
-    bool muxCal = false;
-    while( Serial.available() ) {
-        int ch = Serial.read();
-        if( ch >= '0' && ch <= '6' ) {
-            newGain = ch - '0';
-            gain = 1 << newGain;
-            gainCal = true;
-        }
-        else if( ch >= 'a' && ch <= 'h' ) {
-            chan = ch - 'a';
-            muxCal = true;
-        }
-    }
-    if( gainCal || muxCal ) {
-        if( muxCal ) {
-            ads.mux(chan);
-        }
-        if( gainCal ) {
-            ads.gain(newGain);
-        }
-        ads.selfcal();
-        ads.wait();
+    else {
+        Serial.println("init failed");
     }
 }
 
@@ -180,16 +139,20 @@ uint8_t *swipeAouts = 0;  // measure ain -> gnd
 Ads1256::value_t swipeValues[sizeof(swipeAins)];
 size_t swipeRepeats = 1000;
 
-void loop_swipe() {
+void loop() {
     uint32_t start = millis();
-    memset(swipeValues, 0, sizeof(swipeValues));
+
     size_t count = sizeof(swipeAins);
     if( ads.read_swipe(swipeValues, swipeAins, swipeAouts, count, first) ) {
         first = false;
+
+        // some more swipes to get an average SPS
         for( size_t repeat = 0; repeat < swipeRepeats; repeat++ ) {
             ads.read_swipe(swipeValues, swipeAins, swipeAouts, count, first);
         }
+
         uint32_t elapsed = millis() - start;
+        
         Serial.printf("Swipe SPS = %u: ", count*swipeRepeats*1000/elapsed);
         for( size_t i = 0; i < count; i++ ) {
             int32_t uv = Ads1256::to_microvolts(Ads1256::to_int(swipeValues[i]));
@@ -201,95 +164,4 @@ void loop_swipe() {
         Serial.println("swipe read failed");
         delay(1000);
     }
-}
-
-
-Ads1256::value_t currValues[10000];
-Ads1256::value_t lastValues[10000];
-size_t numValues = sizeof(currValues)/sizeof(*currValues);
-
-void loop_bulk() {
-    static uint8_t gain = 1;
-
-    uint32_t start = millis();
-
-    memset(currValues, 0, sizeof(currValues));
-    bool ok = ads.read_bulk(currValues, numValues, true);
-    uint32_t elapsed = millis() - start;
-
-    uint8_t lastChan = chan;
-    uint8_t lastGain = gain;
-  
-    handleKeypress(chan, gain);
-
-    memcpy(lastValues, currValues, sizeof(lastValues));
-
-    // this could be done in another task so next bulk_read could start earlier (or better use circular buffer)
-    if( ok ) { 
-        Serial.printf("Channel %u with gain factor %u: Elapsed: %u ms -> %u SPS - ", 
-            lastChan, lastGain, elapsed, (numValues*1000)/elapsed);
-        int32_t minValue = INT32_MAX;
-        int32_t maxValue = INT32_MIN;
-        int64_t sumValues = 0;
-        int64_t sumSquaredValues = 0;
-        for( int i = 0; i < numValues; i++ ) {
-            int32_t currValue = Ads1256::to_microvolts(Ads1256::to_int(lastValues[i]), lastGain);
-            if( currValue < minValue ) minValue = currValue;
-            if( currValue > maxValue ) maxValue = currValue;
-            sumValues += currValue;
-            sumSquaredValues += (int64_t)currValue * currValue;
-        }
-        Serial.printf("Bulk(%u): min/max/avg/stddev=%10d, %10d, %10d, %10.2f\n", 
-            numValues, minValue, maxValue, (int32_t)(sumValues/numValues), 
-            sqrt( (sumSquaredValues - (double)(sumValues*sumValues)/numValues) / (numValues - 1) ));
-        printRegs();
-    }
-    else {
-        Serial.println("bulk read failed");
-        delay(1000);
-    }
-}
-
-
-void loop_one_shots() {
-    static uint32_t count = 0;
-
-    int32_t raw = ads.read_once();
-    if( raw != INT32_MIN ) { 
-        Serial.printf("Channel[%u]: %7d µV\n", chan, Ads1256::to_microvolts(raw));
-        if( ++count > 10 ) {
-            count = 0;
-            if( ++chan > 7 ) chan = 0;
-            ads.mux(chan);
-            Serial.println();
-        }
-    }
-    delay(200);
-}
-
-
-void loop_single_query() {
-    static uint32_t count = 0;
-
-    Ads1256::value_t value = {};
-    if( ads.rdata(value) ) {
-        int32_t raw = Ads1256::to_int(value);
-        Serial.printf("Channel[%u]: %7d µV\n", chan, Ads1256::to_microvolts(raw));
-        if( ++count > 10 ) {
-            count = 0;
-            if( ++chan > 7 ) chan = 0;
-            ads.mux(chan);
-        }
-        delay(200);
-        if( !ads.sync() ) Serial.println("sync failed");
-    }
-    else {
-        Serial.println("rdata failed");
-    }
-}
-
-
-void loop() {
-    // loop_swipe();
-    loop_bulk();
 }

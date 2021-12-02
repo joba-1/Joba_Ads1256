@@ -1,0 +1,21 @@
+{
+    "name": "Ads1256",
+    "version": "1.0.0",
+    "keywords": "ADC, TI, esp32",
+    "description": "Library for Texas Instruments low noise 24 bit analog digital converter",
+    "repository":
+    {
+      "type": "git",
+      "url": "https://github.com/joba-1/Ads1256.git"
+    },
+    "authors": [
+      {
+        "name": "joba-1",
+        "url": "https://github.com/joba-1",
+        "maintainer": true
+      }
+    ],
+    "exclude": [".github"],
+    "frameworks": "arduino",
+    "platforms": ["espressif32"]
+  }

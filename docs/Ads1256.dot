@@ -1,6 +1,6 @@
 digraph Ads1256_States {
 
-    # graph [splines=false];
+    graph [splines=false];
 
     DRdy, Cont_DRdy, Idle, Sleep [shape=box, fillcolor=lightyellow, style=filled ]
 

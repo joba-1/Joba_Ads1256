@@ -18,8 +18,8 @@ Since 40mV is a bit low for my testbed, I dont test gain 32 and 64 and use 50-10
 #include <math.h>
 
 // Start measurement if Ain0 is in this mV range
-#define MV_MIN 50
-#define MV_MAX 100
+#define MV_MIN 300
+#define MV_MAX 350
 
 
 #define PIN_CS 5
@@ -38,7 +38,7 @@ Ads1256::Time tick;
 Ads1256::Spi spi(PIN_CS);
 Ads1256 ads(spi, tick, ready);
 
-Ads1256::value_t value[10];  // free choice of size for bulk reads
+Ads1256::value_t value[100];  // free choice of size for bulk reads
 const uint8_t Values = sizeof(value)/sizeof(*value);
 
 
@@ -107,7 +107,7 @@ void setup() {
         int32_t uv = 0;
         uint32_t start = tick.now_ms();
         while( tick.now_ms() - start < 1000 ) {  // valid for at least 1s
-            if( ads.sync() && ads.wait() && ads.rdata(value[0]) ) {
+            if( ads.sync_wakeup() && ads.wait() && ads.rdata(value[0]) ) {
                 uv = Ads1256::to_microvolts(Ads1256::to_int(value[0]));
                 Serial.printf("%8d mV \r", uv / 1000);
             }
@@ -150,6 +150,7 @@ bool analyzeValue( uint8_t gain, size_t &iMin, size_t &iMax, int32_t &uvAvg, int
     return true;
 }
 
+
 void loop() {
     // Arrays of sps rate enum values and strings
     const Ads1256::rate_t Rate[] = { Ads1256::SPS_30K, Ads1256::SPS_15K, Ads1256::SPS_7K5, 
@@ -170,6 +171,7 @@ void loop() {
     static uint8_t gain = 0;
     static size_t rate = 0;
     static bool buffer = false;
+
     static bool calibrate = false;
     static bool bulk = false;
 
@@ -183,7 +185,7 @@ void loop() {
     uint32_t sps;
 
     if( bulk ) {
-        if( ads.sync() && ads.wait() && ads.rdatac(value[0]) ) {
+        if( ads.sync_wakeup() && ads.wait() && ads.rdatac(value[0]) ) {
             size_t v = 1;
             while( v < Values - 1 && ads.wait() && ads.read(value[v]) ) {
                 ++v;
@@ -193,7 +195,7 @@ void loop() {
         sps  = (1000 * Values) / (tick.now_ms() - start + 1);
     }
     else {
-        ok = (ads.sync() && ads.wait() && ads.rdata(value[0]));
+        ok = (ads.sync_wakeup() && ads.wait() && ads.rdata(value[0]));
         sps = 1000 / (tick.now_ms() - start + 1);
     }
 
@@ -203,9 +205,9 @@ void loop() {
             int32_t uvAvg, uvStddev;
             if( analyzeValue(gain, iMin, iMax, uvAvg, uvStddev) ) {
                 int32_t rawMin = Ads1256::to_int(value[iMin]);
-                int32_t uvMin = Ads1256::to_microvolts(rawMin);
+                int32_t uvMin = Ads1256::to_microvolts(rawMin, gain);
                 int32_t rawMax = Ads1256::to_int(value[iMax]);
-                int32_t uvMax = Ads1256::to_microvolts(rawMax);
+                int32_t uvMax = Ads1256::to_microvolts(rawMax, gain);
                 Serial.printf(": sps=%5u, min=(%02x,%02x,%02x) = %8d = %5d.%03d mV, "
                     "max=(%02x,%02x,%02x) = %8d = %5d.%03d mV, stddev=%5d.%03d mV, avg=%5d.%03d mV\n", sps,
                     (uint8_t)value[iMin].hi, value[iMin].mid, value[iMin].lo, rawMin, uvMin / 1000, uvMin % 1000,
@@ -220,7 +222,7 @@ void loop() {
         } 
         else {
             int32_t raw = Ads1256::to_int(value[0]);
-            int32_t uv = Ads1256::to_microvolts(raw);
+            int32_t uv = Ads1256::to_microvolts(raw, gain);
             if( uv != INT32_MAX && uv != INT32_MIN ) {
                 Serial.printf(": sps=%5u, hml=(%02x,%02x,%02x) = %8d = %5d.%03d mV\n",
                     sps, (uint8_t)value[0].hi, value[0].mid, value[0].lo, raw, uv / 1000, uv % 1000);
@@ -240,7 +242,7 @@ void loop() {
         count = 0;
         if( ++chan >= Chans - 5 ) {  // -5 for testing: only chan 0-2
             chan = 0;
-            if( ++gain >= Gains - 2 ) {  // -2 skips 32 and 64
+            if( ++gain >= Gains - 3 ) {  // -3 skips 16, 32 and 64 -> can test up to ~375mV
                 gain = 0;
                 if( ++rate >= Rates - 4 ) {  // -4 skips SPS below 25
                     rate = 0;

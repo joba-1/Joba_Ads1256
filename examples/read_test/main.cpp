@@ -9,7 +9,7 @@ So, if I provide the same ~40 mV on all Ain, I should get results within 200 µV
 This example cycles through all available Ain, gain and SPS, with and without buffering, 
 with or without self calibration after changes and with single shot or bulk readings.
 
-Since 40mV is a bit low for my testbed, I dont test gain 32 and 64 and use 50-100mV
+Since 40mV is a bit low for my testbed, I dont test gain 16, 32 and 64 and use 300-350 mV
 */
 
 #include <Arduino.h>
@@ -22,11 +22,12 @@ Since 40mV is a bit low for my testbed, I dont test gain 32 and 64 and use 50-10
 #define MV_MAX 350
 
 
-#define PIN_CS 5
+#define PIN_CS    5
 #define PIN_DRDY 17
-#define PIN_LED 2
+#define PIN_LED   2
 
 
+// Interrupt flag, set true by falling edge of DRdy
 volatile bool ready = false;
 
 void IRAM_ATTR readyIsr() {
@@ -38,7 +39,7 @@ Ads1256::Time tick;
 Ads1256::Spi spi(PIN_CS);
 Ads1256 ads(spi, tick, ready);
 
-Ads1256::value_t value[100];  // free choice of size for bulk reads
+Ads1256::value_t value[100];  // free choice of size for bulk reads (full SPS above 1000)
 const uint8_t Values = sizeof(value)/sizeof(*value);
 
 
@@ -47,7 +48,7 @@ void resetAds() {
     ads.reset();
     if( ads.wait() ) {
         Serial.print("done, init ");
-        uint8_t cmd = 0b11110000; // IO -> all output, all GND
+        uint8_t cmd = 0b11110000;  // IO -> all gpio as output, all GND
         if( ads.clock_out(Ads1256::CO_OFF)  // dont drive external clock out 
          && ads.wreg(Ads1256::IO, &cmd, 1)  // save power for open pins
          && ads.sps(Ads1256::SPS_30K)       // fast read
@@ -76,12 +77,12 @@ void printRegs() {
     }
 
     Ads1256::value_t o, f;
-    o.lo = data[5]; 
-    o.mid = data[6]; 
-    o.hi = data[7]; 
-    f.lo = data[8]; 
-    f.mid = data[9]; 
-    f.hi = data[10]; 
+    o.lo = data[5];
+    o.mid = data[6];
+    o.hi = data[7];
+    f.lo = data[8];
+    f.mid = data[9];
+    f.hi = data[10];
     Serial.printf("%8d %8d) - ", Ads1256::to_int(o), Ads1256::to_int(f));
 }
 
@@ -92,13 +93,13 @@ void setup() {
 
     attachInterrupt(PIN_DRDY, readyIsr, FALLING);
 
-    ads.begin();  // start spi
+    ads.begin();  // start spi with max allowed speed
 
     // after ESP reset we dont know the ads state -> reset
     // then ads is calibrated, idle, single read mode for channel 0-1 mux, no gain
     resetAds();  // set some basic config (SPS 30k, mux 0->gnd, clock out off, standby)
 
-    // Wait for voltage that is valid for all gain settings
+    // Wait for voltage that is valid for all gain settings used by the test
     if( ads.wakeup() && ads.wait() ) {
         printRegs();
         Serial.printf("waiting for valid input range %d-%d mV on Ain0\n", MV_MIN, MV_MAX);
@@ -106,7 +107,7 @@ void setup() {
         led.toggle();
         int32_t uv = 0;
         uint32_t start = tick.now_ms();
-        while( tick.now_ms() - start < 1000 ) {  // valid for at least 1s
+        while( tick.now_ms() - start < 1000 ) {  // stable for at least 1s
             if( ads.sync_wakeup() && ads.wait() && ads.rdata(value[0]) ) {
                 uv = Ads1256::to_microvolts(Ads1256::to_int(value[0]));
                 Serial.printf("%8d mV \r", uv / 1000);
@@ -152,7 +153,7 @@ bool analyzeValue( uint8_t gain, size_t &iMin, size_t &iMax, int32_t &uvAvg, int
 
 
 void loop() {
-    // Arrays of sps rate enum values and strings
+    // Arrays of used sps rate enum values and strings
     const Ads1256::rate_t Rate[] = { Ads1256::SPS_30K, Ads1256::SPS_15K, Ads1256::SPS_7K5, 
         Ads1256::SPS_3K75, Ads1256::SPS_2K, Ads1256::SPS_1K, Ads1256::SPS_500, Ads1256::SPS_100,
         Ads1256::SPS_60, Ads1256::SPS_50, Ads1256::SPS_30, Ads1256::SPS_25, Ads1256::SPS_15, 
@@ -182,8 +183,9 @@ void loop() {
         count, chan, 1<<gain, Sps[rate], buffer ? 'y' : 'n', bulk ? 'y' : 'n', calibrate ? 'y' : 'n');
 
     uint32_t start = tick.now_ms();
-    uint32_t sps;
+    uint32_t sps;  // measured SPS (compare with rate setting)
 
+    // Do one bulk or one single measurement
     if( bulk ) {
         if( ads.sync_wakeup() && ads.wait() && ads.rdatac(value[0]) ) {
             size_t v = 1;
@@ -199,6 +201,7 @@ void loop() {
         sps = 1000 / (tick.now_ms() - start + 1);
     }
 
+    // Evaluate measurement result
     if( ok ) {
         if( bulk ) {
             size_t iMin, iMax;
@@ -240,11 +243,11 @@ void loop() {
     // iterate over all permutations
     if( ++count >= Counts ) {
         count = 0;
-        if( ++chan >= Chans - 5 ) {  // -5 for testing: only chan 0-2
+        if( ++chan >= Chans - 5 ) {  // -5 for testing (only chan 0-2)
             chan = 0;
-            if( ++gain >= Gains - 3 ) {  // -3 skips 16, 32 and 64 -> can test up to ~375mV
+            if( ++gain >= Gains - 3 ) {  // -3 skips 16, 32 and 64 (no overflow below ~375mV)
                 gain = 0;
-                if( ++rate >= Rates - 4 ) {  // -4 skips SPS below 25
+                if( ++rate >= Rates - 4 ) {  // -4 skips SPS below 25 (boring to wait)
                     rate = 0;
                     buffer = !buffer;
                     if( !buffer ) {

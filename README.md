@@ -8,14 +8,13 @@ Driver for fast 8 channel 24bit ADC converter from TI
 * easy to use
 
 ## Status
-* works for arduino framework on ESP32, reading
+works for arduino framework on ESP32, reading
 * single raw values
 * raw values in bulk
 * swipe across channels
 
 ## Todo 
 * make it a lib for arduino and platformio, 
-* convert raw to volts and with gain
 
 ## License 
 GPL V2

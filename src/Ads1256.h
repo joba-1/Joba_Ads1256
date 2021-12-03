@@ -138,7 +138,7 @@ public:
     bool sysgcal();
     bool wakeup();
     bool standby();
-    bool sync();
+    bool sync_wakeup();
     bool rdata( value_t &value );   // read single value
     bool rdatac( value_t &value );  // start continuous mode with first value
     bool read( value_t &value, bool last = false );  // read value in continuous mode, stop continuous mode if last

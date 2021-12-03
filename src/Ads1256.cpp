@@ -61,7 +61,7 @@ bool Ads1256Base::sysgcal() {
     return xcal(SYSGCAL);
 }
 
-bool Ads1256Base::sync() {
+bool Ads1256Base::sync_wakeup() {
     if( !((_state == DRDY && _ready) || _state == IDLE) ) return false;
     command(SYNC);
     _time.delay_us(tx_us(T11b-T11a));  // pg 6
@@ -321,7 +321,7 @@ bool Ads1256Base::wait( uint32_t timeout_ms ) {
         wakeup();
     }
     else if ( _state == IDLE ) {
-        sync();
+        sync_wakeup();
     }
     uint32_t start_ms = _time.now_ms();
     while( !_ready ) {
@@ -351,7 +351,7 @@ int32_t Ads1256Base::read_once( uint32_t timeout_ms ) {
 int32_t Ads1256Base::read_once( uint8_t ain, uint8_t aout, uint8_t gain_power, uint32_t timeout_ms ) {
     if( _state == CONT ) wait(timeout_ms);  // pg 37
     reset();
-    if( wait(timeout_ms) && mux(ain, aout) && gain(gain_power) && sync() ) {
+    if( wait(timeout_ms) && mux(ain, aout) && gain(gain_power) && sync_wakeup() ) {
         return read_once();
     }
     return INT32_MIN;

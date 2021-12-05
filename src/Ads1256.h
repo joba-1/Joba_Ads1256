@@ -24,10 +24,6 @@ Status:
 * Performance
   * bulk read: ~29800 SPS
   * swipe read over all channels: ~3440 SPS
-
-TODO:
-  * The to_microvolts() function does not work properly for gain != 0
-  * The readings are quite different for one shot and bulk readings
 */
 
 #include <stdint.h>
@@ -174,7 +170,7 @@ public:
     // Convert signed 24bit struct to signed 32bit
     static int32_t to_int( const value_t &value );
     // AinP voltage relative to AinN (with gain factor = 2^gain and uvRef = VrefP - VrefN) 
-    static int32_t to_microvolts( int32_t raw, uint8_t gain = 0, int32_t uvRef = UV_REF );  // TODO: WIP
+    static int32_t to_microvolts( int32_t raw, uint8_t gain = 0, int32_t uvRef = UV_REF );
 
 private:
     // Chip SPI timings in terms of chip frequency [1/fclkin]

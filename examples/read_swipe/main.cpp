@@ -3,8 +3,10 @@
 #include <Ads1256.h>
 
 
-#define PIN_CS 5
-#define PIN_DRDY 17
+//#define PIN_CS 5
+//#define PIN_DRDY 17
+#define PIN_CS D8
+#define PIN_DRDY D1
 
 
 volatile bool ready = false;

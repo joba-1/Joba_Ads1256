@@ -83,7 +83,7 @@ void check24bit() {
         {{ (int8_t)0xff, 0xff, 0xff }},
         {{ (int8_t)0x80, 0, 0 }} };
 
-    Serial.printf("%30s -> %11d %11d %11d %11d %11d %11d %11d gains\n", "u, i, raw", 0, 1, 2, 3, 4, 5, 6);
+    Serial.printf("%32s -> %11d %11d %11d %11d %11d %11d %11d gains\n", "u, i, raw", 0, 1, 2, 3, 4, 5, 6);
     for( uint32_t u=0; u<=0xffffff; u++) {    // possible values from sensor as uint32_t
         int32_t i = (int32_t)(u | ((u & 0x800000) ? 0xff000000 : 0));  // possible values from sensor as int32_t
         Ads1256::value_t value;               // possible values from sensor as value_t
@@ -106,6 +106,9 @@ void check24bit() {
         if( !isExample && i != raw ) {
             Serial.printf("0x%06x => %8d != %8d -> error\n", u, i, raw);
         }
+        if( u % 10000 ) {
+            yield();
+        }
     }
 }
 
@@ -115,6 +118,7 @@ void setup() {
     // delay(1500);
     Serial.println("\nADS1256 swipe " __FILE__ " " __TIMESTAMP__);
 
+    // check 24bit calculations - this takes a while
     // check24bit();
  
     attachInterrupt(PIN_DRDY, readyIsr, FALLING);
@@ -158,7 +162,7 @@ void loop() {
         Serial.printf("Swipe SPS = %u: ", count*swipeRepeats*1000/elapsed);
         for( size_t i = 0; i < count; i++ ) {
             int32_t uv = Ads1256::to_microvolts(Ads1256::to_int(swipeValues[i]));
-            Serial.printf("%u = %d, ", swipeAins[i], uv);
+            Serial.printf("%u = %d µV, ", swipeAins[i], uv);
         }
         Serial.println();
     }

@@ -4,8 +4,16 @@
 #include <math.h>
 
 
+// example pins for ESP8266 and ESP32
+#if defined(ESP8266)
+#define PIN_CS D8
+#define PIN_DRDY D1
+#elif defined(ESP32)
 #define PIN_CS 5
 #define PIN_DRDY 17
+#else
+#error "No ESP8266 or ESP32, define your pins here!"
+#endif
 
 
 volatile bool ready = false;
@@ -19,7 +27,8 @@ Ads1256::Time dly;
 Ads1256::Spi spi(PIN_CS);
 Ads1256 ads(spi, dly, ready);
 
-uint8_t chan = 0;
+uint8_t chan = 7;  // first channel
+uint8_t gain = 0;  // first gain factor = 2^gain
 
 
 void resetAds() {
@@ -27,11 +36,12 @@ void resetAds() {
     ads.reset();
     if( ads.wait() ) {
         Serial.print("done, init ");
+        ads.buffer(false);
         uint8_t cmd = 0b11110000; // IO -> all output, all GND
         if( ads.clock_out(Ads1256::CO_OFF)  // dont drive external clock out 
          && ads.wreg(Ads1256::IO, &cmd, 1)  // save power for open pins
-         && ads.sps(Ads1256::SPS_30K)       // fast read
-         && ads.mux(0)                      // 0->gnd
+         && ads.sps(Ads1256::SPS_100)       // fast read
+         && ads.mux(chan)                   // chan->gnd
          && ads.standby() ) {               // standby
             Serial.println("done: standby");
         }
@@ -89,14 +99,12 @@ void setup() {
 
 
 void handleKeypress( uint8_t &chan, uint8_t &gain ) {
-    uint8_t newGain = gain;
     bool gainCal = false;
     bool muxCal = false;
     while( Serial.available() ) {
         int ch = Serial.read();
         if( ch >= '0' && ch <= '6' ) {
-            newGain = ch - '0';
-            gain = 1 << newGain;
+            gain = ch - '0';
             gainCal = true;
         }
         else if( ch >= 'a' && ch <= 'h' ) {
@@ -109,7 +117,7 @@ void handleKeypress( uint8_t &chan, uint8_t &gain ) {
             ads.mux(chan);
         }
         if( gainCal ) {
-            ads.gain(newGain);
+            ads.gain(gain);
         }
         ads.selfcal();
         ads.wait();
@@ -117,18 +125,18 @@ void handleKeypress( uint8_t &chan, uint8_t &gain ) {
 }
 
 
-Ads1256::value_t currValues[10000];
-Ads1256::value_t lastValues[10000];
+Ads1256::value_t currValues[200];
+Ads1256::value_t lastValues[200];
 size_t numValues = sizeof(currValues)/sizeof(*currValues);
 
 void print_stats( uint8_t chan, uint8_t gain, uint32_t elapsed ) {
     Serial.printf("Channel %u with gain factor %u: Elapsed: %u ms -> %u SPS - ", 
-        chan, gain, elapsed, (numValues*1000)/elapsed);
+        chan, 1 << gain, elapsed, (numValues*1000)/elapsed);
     int32_t minValue = INT32_MAX;
     int32_t maxValue = INT32_MIN;
     int64_t sumValues = 0;
     int64_t sumSquaredValues = 0;
-    for( int i = 0; i < numValues; i++ ) {
+    for( size_t i = 0; i < numValues; i++ ) {
         int32_t currValue = Ads1256::to_microvolts(Ads1256::to_int(lastValues[i]), gain);
         if( currValue < minValue ) minValue = currValue;
         if( currValue > maxValue ) maxValue = currValue;
@@ -143,8 +151,6 @@ void print_stats( uint8_t chan, uint8_t gain, uint32_t elapsed ) {
 
 
 void loop() {
-    static uint8_t gain = 1;
-
     uint32_t start = millis();
 
     bool ok = ads.read_bulk(currValues, numValues, true);

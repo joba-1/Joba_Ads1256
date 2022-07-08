@@ -1,7 +1,7 @@
 /*
 NTC ADS1256 example: continuously reading swipes of configured channels.
 Results are shown on serial, syslog, webserver and an influx db.
-Influx DB can be created with command influx -execute "create database Ads"
+Influx DB can be created with command influx -execute "create database AdsNtc"
 Extended post_influx example to actually show temperatures taken by 8 NTCs with voltage dividers.
 
 Connection table
@@ -162,7 +162,7 @@ class Ntc {
   public:
     Ntc(int32_t uvcc, uint32_t r1, uint32_t r2, int32_t t, uint32_t rt, uint32_t beta) :
       _uvcc(uvcc), _c1(1.0/r1), _c2(1.0/r2), _milli_beta(beta*1000), 
-      _beta_over_tk_minus_log_rt(beta/(25 + 273.15) - log(rt)), _r_mo(), _t_mc() {}
+      _beta_over_tk_minus_log_rt(beta/(t + 273.15) - log(rt)), _r_mo(), _t_mc() {}
 
     // Calculate ntc resistance and temperature from measured voltage
     // r_ntc = 1/((uvcc/uvin - 1)/r2 - 1/r1);

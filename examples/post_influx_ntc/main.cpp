@@ -46,11 +46,16 @@ const int32_t num_avg = 100;  // weight of old value avg vs new value
 #include <ESP8266HTTPUpdateServer.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266mDNS.h>
 #include <WiFiClient.h>
 
 // Post to InfluxDB
 #include <ESP8266HTTPClient.h>
+
+// Publish via MQTT
+#include <PubSubClient.h>
+
+WiFiClient wifiMqtt;
+PubSubClient mqtt(wifiMqtt);
 
 #define DB_LED_ON LOW
 #define DB_LED_OFF HIGH
@@ -140,6 +145,7 @@ int32_t ads1256_in[8] = {0};
 int32_t ads1256_uv[8] = {0};
 int32_t ads1256_avg_uv[8] = {0};
 
+
 /* Class to calculate temperature from measured ntc voltage
  0v   uvin   uvcc
  |      |      |
@@ -190,6 +196,7 @@ class Ntc {
     int32_t _t_mc[8];
 };
 
+
 Ntc ntc(5000000, 18000, 22000, 25, 100000, 3950);
 
 // Reset Ads1256 into defined state
@@ -214,6 +221,7 @@ void resetAds() {
     Serial.println("failed");
   }
 }
+
 
 // Post data to InfluxDB
 void post_data() {
@@ -252,6 +260,57 @@ void post_data() {
   };
 }
 
+
+void publish() {
+  static int32_t prev[8] = { INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX };
+  
+  const int32_t *temps = ntc.t_mc();
+
+  for( size_t i = 0; i < sizeof(prev)/sizeof(*prev); i++ ) {
+    if( prev[i] != temps[i] ) {
+      char topic[80];
+      char payload[12];
+      snprintf(topic, sizeof(topic), MQTT_TOPIC "/Temp%u", i);
+      snprintf(payload, sizeof(payload), "%0.3f", (float)temps[i] / 1000);
+      if( mqtt.publish(topic, payload) ) {
+        prev[i] = temps[i];
+      }
+    }
+  }
+}
+
+
+// Maintain MQTT connection
+void handle_mqtt() {
+  static const int32_t interval = 5000;  // if disconnected try reconnect this often in ms
+  static uint32_t prev = -interval;      // first connect attempt without delay
+  static char msg[128];
+
+  if (mqtt.connected()) {
+    mqtt.loop();
+  }
+  else {
+    uint32_t now = millis();
+    if (now - prev > interval) {
+      prev = now;
+
+      if (mqtt.connect(HOSTNAME, MQTT_TOPIC "/LWT", 0, true, "Offline")
+      && mqtt.publish(MQTT_TOPIC "/LWT", "Online", true)
+      && mqtt.publish(MQTT_TOPIC "/Version", VERSION, true) ) {
+        snprintf(msg, sizeof(msg), "Connected to MQTT broker %s:%d using topic %s", MQTT_BROKER, MQTT_PORT, MQTT_TOPIC);
+        syslog.log(LOG_NOTICE, msg);
+      }
+      else {
+        int error = mqtt.state();
+        mqtt.disconnect();
+        snprintf(msg, sizeof(msg), "Connect to MQTT broker %s:%d failed with code %d", MQTT_BROKER, MQTT_PORT, error);
+        syslog.log(LOG_ERR, msg);
+      }
+    }
+  }
+}
+
+
 // Standard page
 const char *main_page( const char *body ) {
   static const char fmt[] =
@@ -275,6 +334,7 @@ const char *main_page( const char *body ) {
       "  </tr></table>\n"
       "  <div>Post firmware image to /update<div>\n"
       "  <div>Influx status: %d<div>\n"
+      "  <div>MQTT status: %s<div>\n"
       "  <div>Last update: %s<div>\n"
       " </body>\n"
       "</html>\n";
@@ -283,9 +343,10 @@ const char *main_page( const char *body ) {
   time_t now;
   time(&now);
   strftime(curr_time, sizeof(curr_time), "%FT%T%Z", localtime(&now));
-  snprintf(page, sizeof(page), fmt, body, influx_status, curr_time);
+  snprintf(page, sizeof(page), fmt, body, influx_status, mqtt.connected() ? "connected" : "disconnected", curr_time);
   return page;
 }
+
 
 // Define web pages for update, reset or for event infos
 void setup_webserver() {
@@ -364,9 +425,9 @@ void setup_webserver() {
 
   web_server.begin();
 
-  MDNS.addService("http", "tcp", WEBSERVER_PORT);
   syslog.logf(LOG_NOTICE, "Serving HTTP on port %d", WEBSERVER_PORT);
 }
+
 
 volatile bool have_time = false;  // for breathing
 
@@ -380,6 +441,7 @@ void check_ntptime() {
     syslog.logf(LOG_NOTICE, "Booted at %s", start_time);
   }
 }
+
 
 // Status led update
 void IRAM_ATTR breathe() {
@@ -409,6 +471,7 @@ void IRAM_ATTR breathe() {
   }
 }
 
+
 // Interrupt handler 
 void IRAM_ATTR readyIsr() { 
   ready = true;
@@ -417,6 +480,7 @@ void IRAM_ATTR readyIsr() {
     breathe();
   }
 }
+
 
 // Send ads1256 data to serial and syslog
 void slog(const char label[], const int32_t values[], bool as_unsigned = false ) {
@@ -428,6 +492,7 @@ void slog(const char label[], const int32_t values[], bool as_unsigned = false )
   syslog.logf(LOG_INFO, msg);
   Serial.println(msg);
 }
+
 
 // Startup
 void setup() {
@@ -475,10 +540,10 @@ void setup() {
 
   ntp.begin();
 
-  MDNS.begin(WiFi.getHostname());
-
   esp_updater.setup(&web_server);
   setup_webserver();
+
+  mqtt.setServer(MQTT_BROKER, MQTT_PORT);
 
   attachInterrupt(PIN_DRDY, readyIsr, FALLING);
 
@@ -501,6 +566,7 @@ void setup() {
   }
 }
 
+
 // Main loop
 void loop() {
   Ads1256::value_t values[sizeof(ads1256_ains)] = {0};
@@ -510,6 +576,7 @@ void loop() {
   check_ntptime();
   web_server.handleClient();
   updateStatus.noUpdate();
+  handle_mqtt();
 
   if (ads.read_swipe(values, ads1256_ains, 0, sizeof(ads1256_ains), first_swipe)) {
     swipes++;
@@ -535,6 +602,7 @@ void loop() {
       slog("r_ntc:", (const int32_t *)ntc.r_mo(), true);
       slog("temp:", ntc.t_mc());
       post_data();
+      publish();
       swipes = 0;
     }
   } else {
